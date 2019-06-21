@@ -5,7 +5,8 @@ externalVolume = '/opt/vcde/'
 netWork = 'vcd_frontend'
 
 # applications
-browser = 'rayvtoll/vcd-firefox'
+firefox = 'rayvtoll/vcd-firefox'
+chrome = 'rayvtoll/vcd-chrome'
 libreoffice = 'rayvtoll/vcd-libreoffice'
 
 # import libraries
@@ -28,21 +29,19 @@ def list_containers():
 def create_container():
     dockerPs = 'docker ps --filter name=vcd-' + request.json.get('user') + '-* --format "{{ json .}}" | jq --slurp .'
     print(dockerPs)
-    if request.json.get('app') == "browser":
-        openApps = str(subprocess.check_output(dockerPs, shell=True))
-        print(openApps)
-        if "browser" in openApps:
-            os.system("docker container rm -f vcd-" + request.json.get('user') + "-browser")
+    if request.json.get('app') == "firefox":
         key = subprocess.check_output("cat " + keyDir + request.json.get('user') + ".key", shell=True).decode('utf-8').replace("\n","")
-        dockerRun =  str('docker run --rm -e KEY="' + key + '" --name vcd-' + request.json.get('user') + '-browser -d --network ' + netWork + ' -e USER=' + request.json.get("user") + ' -v ' + externalVolume + request.json.get("user") + '/Downloads:/home/' + request.json.get("user") + '/Downloads/ ' + browser)
+        dockerRun =  str('docker run --rm -e KEY="' + key + '" --name vcd-' + request.json.get('user') + '-firefox -d --network ' + netWork + ' -e USER=' + request.json.get("user") + ' -v ' + externalVolume + request.json.get("user") + '/Downloads:/home/' + request.json.get("user") + '/Downloads/ ' + firefox)
         exitCode = str(os.system(dockerRun))
-        return jsonify([{"starting" : "browser"}])
+        return jsonify([{"starting" : "firefox"}])
+
+    if request.json.get('app') == "chrome":
+        key = subprocess.check_output("cat " + keyDir + request.json.get('user') + ".key", shell=True).decode('utf-8').replace("\n","")
+        dockerRun =  str('docker run --rm --device /dev/dri --security-opt seccomp=/app/chrome.json -e KEY="' + key + '" --name vcd-' + request.json.get('user') + '-chrome -d --network ' + netWork + ' -e USER=' + request.json.get("user") + ' -v ' + externalVolume + request.json.get("user") + '/Downloads:/home/' + request.json.get("user") + '/Downloads/ ' + chrome)
+        exitCode = str(os.system(dockerRun))
+        return jsonify([{"starting" : "chrome"}])
 
     if request.json.get('app') == "libreoffice":
-        openApps = str(subprocess.check_output(dockerPs, shell=True))
-        print(openApps)
-        if "libreoffice" in openApps:
-            os.system("docker container rm -f vcd-" + request.json.get('user') + "-libreoffice")
         key = subprocess.check_output("cat " + keyDir + request.json.get('user') + ".key", shell=True).decode('utf-8').replace("\n","")
         dockerRun =  str('docker run --rm -e KEY="' + key + '" --name vcd-' + request.json.get('user') + '-libreoffice -d --network ' + netWork + ' -e USER=' + request.json.get("user") + ' -v ' + externalVolume + request.json.get("user") + '/Documents:/home/' + request.json.get("user") + '/Documents/ ' + libreoffice)
         exitCode = str(os.system(dockerRun))
