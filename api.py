@@ -1,57 +1,71 @@
+# import libraries
+import os
+import time
+import json
+import subprocess
+from flask import Flask, jsonify, request, make_response
+
 # This needs to become a distributed storage location
 externalVolume = '/opt/vcde/'
 
 # Other variables
 netWork = 'vcd_frontend'
+directories = ["Downloads", "Documents", "Desktop", "Music", "Pictures", "Public", "Templates", "Videos"]
+netWorkJson = 'docker network inspect ' + netWork
+keyDir = "/tmp/keys/"
+os.system(str("mkdir -p " + keyDir))
 
 # applications
 firefox = 'rayvtoll/vcd-firefox'
 chrome = 'rayvtoll/vcd-chrome'
 libreoffice = 'rayvtoll/vcd-libreoffice'
-
-# import libraries
-import os
-import time
-import subprocess
-from flask import Flask, jsonify, request, make_response
-
-# declaring additional variables
 app = Flask(__name__)
-keyDir = "/tmp/keys/"
-os.system(str("mkdir -p " + keyDir))
-
-@app.route('/', methods=['GET'])
-def list_containers():
-    dockerPs = str('docker ps --format "{{ json .}}" | jq --slurp .')
-    return subprocess.check_output(dockerPs, shell=True)
 
 @app.route('/', methods=['POST'])
 def create_container():
-    dockerPs = 'docker ps --filter name=vcd-' + request.json.get('user') + '-* --format "{{ json .}}" | jq --slurp .'
-    print(dockerPs)
+    volumeMounts = ""
+    for i in directories:
+        volumeMounts += ' -v ' + externalVolume + request.json.get("user") + '/' + i + ':/home/' + request.json.get("user") + '/' + i + '/ '
+    dockerRun = "docker run --rm -d --network " + netWork + volumeMounts
+
+    data = json.loads(subprocess.check_output(netWorkJson, shell=True))
+    requestHost = ""
+    for i in data[0]['Containers']:
+        if data[0]['Containers'][i]['IPv4Address'].split("/")[0] == request.environ['REMOTE_ADDR']:
+            requestHost += data[0]['Containers'][i]['Name']
+    requestUser = requestHost.split("-")[1]
+    key = subprocess.check_output("cat " + keyDir + requestUser + ".key", shell=True).decode('utf-8').replace("\n","")
+
     if request.json.get('app') == "firefox":
-        key = subprocess.check_output("cat " + keyDir + request.json.get('user') + ".key", shell=True).decode('utf-8').replace("\n","")
-        dockerRun =  str('docker run --rm -e KEY="' + key + '" --name vcd-' + request.json.get('user') + '-firefox -d --network ' + netWork + ' -e USER=' + request.json.get("user") + ' -v ' + externalVolume + request.json.get("user") + '/Downloads:/home/' + request.json.get("user") + '/Downloads/ ' + firefox)
-        exitCode = str(os.system(dockerRun))
+        hostName = requestHost + '-firefox' 
+        dockerCmd =  str(dockerRun + ' -e KEY="' + key + '" -h ' + hostName + ' --name ' + hostName + ' -e USER=' + requestUser + " " + firefox)
+        exitCode = str(os.system(dockerCmd))
         return jsonify([{"starting" : "firefox"}])
 
     if request.json.get('app') == "chrome":
-        key = subprocess.check_output("cat " + keyDir + request.json.get('user') + ".key", shell=True).decode('utf-8').replace("\n","")
-        dockerRun =  str('docker run --rm --device /dev/dri --security-opt seccomp=/app/chrome.json -e KEY="' + key + '" --name vcd-' + request.json.get('user') + '-chrome -d --network ' + netWork + ' -e USER=' + request.json.get("user") + ' -v ' + externalVolume + request.json.get("user") + '/Downloads:/home/' + request.json.get("user") + '/Downloads/ ' + chrome)
-        exitCode = str(os.system(dockerRun))
+        hostName = 'vcd-' + request.json.get('user') + '-chrome'
+        dockerCmd =  str(dockerRun + ' --device /dev/dri --security-opt seccomp=/app/chrome.json -e KEY="' + key + '" -h ' + hostName + ' --name ' + hostName + ' -e USER=' + requestUser + " " + chrome)
+        exitCode = str(os.system(dockerCmd))
         return jsonify([{"starting" : "chrome"}])
 
     if request.json.get('app') == "libreoffice":
-        key = subprocess.check_output("cat " + keyDir + request.json.get('user') + ".key", shell=True).decode('utf-8').replace("\n","")
-        dockerRun =  str('docker run --rm -e KEY="' + key + '" --name vcd-' + request.json.get('user') + '-libreoffice -d --network ' + netWork + ' -e USER=' + request.json.get("user") + ' -v ' + externalVolume + request.json.get("user") + '/Documents:/home/' + request.json.get("user") + '/Documents/ ' + libreoffice)
-        exitCode = str(os.system(dockerRun))
+        hostName = requestHost + '-libreoffice'
+        dockerCmd =  str(dockerRun + ' -e KEY="' + key + '" -h ' + hostName + ' --name ' + hostName + ' -e USER=' + requestUser + " " + libreoffice)
+        exitCode = str(os.system(dockerCmd))
         return jsonify([{"starting" : "LibreOffice"}])
 
 @app.route('/key', methods=['POST'])
 def store_keys():
+    netWorkJson = 'docker network inspect ' + netWork
+    data = json.loads(subprocess.check_output(netWorkJson, shell=True))
+    requestHost = ""
+    for i in data[0]['Containers']:
+        if data[0]['Containers'][i]['IPv4Address'].split("/")[0] == request.environ['REMOTE_ADDR']:
+            requestHost += data[0]['Containers'][i]['Name']
+    requestUser = requestHost.split("-")[1]
     addSpaces = str(request.json.get('key').replace("%20", " "))
-    command = str("echo '" + addSpaces + "' > /tmp/keys/" + request.json.get('user') + ".key")
-    return jsonify([{"key": request.json.get('key'),"addSpaces": addSpaces,"user": request.json.get('user'),"command": command,"exitcode": os.system(command)}])
+    command = str("echo '" + addSpaces + "' > /tmp/keys/" + requestUser + ".key")
+    return jsonify([{"key": addSpaces,"user": requestUser,"command": command,"exitcode": os.system(command)}])
 
 @app.errorhandler(400)
 def not_found(error):
