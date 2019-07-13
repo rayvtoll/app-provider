@@ -24,17 +24,18 @@ app = Flask(__name__)
 @app.route('/', methods=['POST'])
 def create_container():
     volumeMounts = ""
-    for i in directories:
-        volumeMounts += ' -v ' + externalVolume + request.json.get("user") + '/' + i + ':/home/' + request.json.get("user") + '/' + i + '/ '
-    dockerRun = "docker run --rm -d --network " + netWork + volumeMounts
+    requestHost = ""
 
     data = json.loads(subprocess.check_output(netWorkJson, shell=True))
-    requestHost = ""
     for i in data[0]['Containers']:
         if data[0]['Containers'][i]['IPv4Address'].split("/")[0] == request.environ['REMOTE_ADDR']:
             requestHost += data[0]['Containers'][i]['Name']
     requestUser = requestHost.split("-")[1]
     key = subprocess.check_output("cat " + keyDir + requestUser + ".key", shell=True).decode('utf-8').replace("\n","")
+
+    for i in directories:
+        volumeMounts += ' -v ' + externalVolume + requestUser + '/' + i + ':/home/' + requestUser + '/' + i + '/ '
+    dockerRun = "docker run --rm -d --network " + netWork + volumeMounts
 
     if request.json.get('app') == "firefox":
         hostName = requestHost + '-firefox' 
@@ -43,7 +44,7 @@ def create_container():
         return jsonify([{"starting" : "firefox"}])
 
     if request.json.get('app') == "chrome":
-        hostName = 'vcd-' + request.json.get('user') + '-chrome'
+        hostName = requestHost + '-chrome'
         dockerCmd =  str(dockerRun + ' --device /dev/dri --security-opt seccomp=/app/chrome.json -e KEY="' + key + '" -h ' + hostName + ' --name ' + hostName + ' -e USER=' + requestUser + " " + chrome)
         exitCode = str(os.system(dockerCmd))
         return jsonify([{"starting" : "chrome"}])
