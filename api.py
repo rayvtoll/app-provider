@@ -1,5 +1,5 @@
 # import libraries
-import os, time, json, subprocess
+import os, time, json, subprocess, logging
 from flask import Flask, jsonify, request, make_response
 
 # This needs to become a distributed storage location
@@ -16,41 +16,42 @@ for i in applications:
     appImage[i] = "rayvtoll/vcd-" + i + ":latest"
 app = Flask(__name__)
 
-# applicatie functie
-def startApp(dockerRun, requestHost, requestUser, app):
-    hostName = requestHost + '-' + app
-    dockerCmd = str(dockerRun + ' -h ' + hostName + ' --name ' + hostName + ' -e USER=' + requestUser + " " + appImage[app])
-    os.system(dockerCmd)
+# van source IP naar hostnaam
+def request_host(request, data):
+    for i in data:
+        if data[i]['IPv4Address'].split("/")[0] == request:
+            return data[i]['Name'] #.replace("-nautilus", "")
 
+# API
 @app.route('/', methods=['POST'])
 def create_container():
+    requestedApp = request.json.get('app')
+    if not requestedApp in applications:
+        return jsonify([{"requested app" : "not available"}])
+
     # achterhalen welke host de aanvraag doet
-    requestHost = ""
-    data = json.loads(subprocess.check_output(netWorkJson, shell=True))
-    for i in data[0]['Containers']:
-        if data[0]['Containers'][i]['IPv4Address'].split("/")[0] == request.environ['REMOTE_ADDR']:
-            requestHost += data[0]['Containers'][i]['Name'] #.replace("-nautilus", "")
+    data = json.loads(subprocess.check_output(netWorkJson, shell=True))[0]['Containers']
+    requestHost = request_host(request.environ['REMOTE_ADDR'], data)
     requestUser = requestHost.split("-")[1]
+    hostName = requestHost + "-" + requestedApp
 
     #controleren of applicatiecontainer al bestaat
-    for i in data[0]['Containers']:
-        if data[0]['Containers'][i]['Name'] == "vcd-" + requestUser + "-" + request.json.get('app'):
-            return jsonify([{"already started" : request.json.get('app')}])
-    
+    if hostName in str(data):
+        return jsonify([{"already started" : requestedApp}])
+
     # lijstje met te mounten volumes en ssh-key
     volumeMounts = ""
     volumeMounts += ' -v ' + externalVolume + requestUser + ':/home/' + requestUser
     volumeMounts += ' -v ' + externalVolume + 'Public:/home/' + requestUser + '/Public '
     volumeMounts += ' -v ' + externalVolume + requestUser + '/.ssh/id_rsa.pub:/home/' + requestUser + '/.ssh/authorized_keys:ro '
     dockerRun = "docker run --rm -d --network " + netWork + volumeMounts
-    
-    # applicatie loop
-    for i in applications:
-        if request.json.get('app') == i:
-            if i == "chrome":
-                dockerRun +=  ' --device /dev/dri --security-opt seccomp=/app/chrome.json '
-            startApp(dockerRun, requestHost, requestUser, i)
-            return jsonify([{"starting" : i}])
+    if requestedApp == "chrome":
+        dockerRun +=  ' --device /dev/dri --security-opt seccomp=/app/chrome.json '
+    if requestedApp == "chrome" or requestedApp == "firefox":
+        dockerRun += ' --shm-size=2g '
+    dockerCmd = str(dockerRun + ' -h ' + hostName + ' --name ' + hostName + ' -e USER=' + requestUser + " " + appImage[requestedApp])
+    os.system(dockerCmd)
+    return jsonify([{"starting" : requestedApp}])
     
 @app.errorhandler(400)
 def not_found(error):
