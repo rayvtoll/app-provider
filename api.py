@@ -10,7 +10,7 @@ netWork = 'vcd_frontend'
 netWorkJson = 'docker network inspect ' + netWork
 
 # applications
-applications = ["firefox", "chrome", "libreoffice", "evolution", "geary", "thunderbird", "nautilus"]
+applications = ["gimp", "firefox", "chrome", "libreoffice", "evolution", "geary", "thunderbird", "nautilus"]
 appImage = {}
 for i in applications:
     appImage[i] = "rayvtoll/vcd-" + i + ":latest"
@@ -47,7 +47,7 @@ def create_container():
     dockerRun = "docker run --rm -d --network " + netWork + volumeMounts
     if requestedApp == "chrome":
         dockerRun +=  ' --device /dev/dri --security-opt seccomp=/app/chrome.json '
-    if requestedApp == "chrome" or requestedApp == "firefox":
+    if requestedApp == "chrome" or requestedApp == "firefox" or requestedApp == "gimp":
         dockerRun += ' --shm-size=2g '
     dockerCmd = str(dockerRun + ' -h ' + hostName + ' --name ' + hostName + ' -e USER=' + requestUser + " " + appImage[requestedApp])
     os.system(dockerCmd)
