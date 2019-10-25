@@ -1,58 +1,80 @@
-# import libraries
-import os, time, json, subprocess, logging
+import json, subprocess, os
 from flask import Flask, jsonify, request, make_response
 
-# This needs to become a distributed storage location
-externalVolume = '/opt/vcde/'
-
-# Other variables
+externalVolume = "/opt/vcde"
 netWork = 'vcd_frontend'
-netWorkJson = 'docker network inspect ' + netWork
 
 # applications
-applications = ["gimp", "firefox", "chrome", "libreoffice", "evolution", "geary", "thunderbird", "nautilus"]
-appImage = {}
-for i in applications:
-    appImage[i] = "rayvtoll/vcd-" + i + ":latest"
 app = Flask(__name__)
+app.Response = "whatever"
+apps = ["gimp", "firefox", "chrome", "libreoffice", "evolution", "geary", "thunderbird", "nautilus"]
+appImage = {}
+for a in apps:
+    appImage[a] = "rayvtoll/vcd-{}:latest".format(a)
 
-# van source IP naar hostnaam
-def request_host(request, data):
-    for i in data:
-        if data[i]['IPv4Address'].split("/")[0] == request:
-            return data[i]['Name'] #.replace("-nautilus", "")
+class DockerRun:  # class to start application container
 
-# API
-@app.route('/', methods=['POST'])
-def create_container():
-    requestedApp = request.json.get('app')
-    if not requestedApp in applications:
-        return jsonify([{"requested app" : "not available"}])
-
-    # achterhalen welke host de aanvraag doet
-    data = json.loads(subprocess.check_output(netWorkJson, shell=True))[0]['Containers']
-    requestHost = request_host(request.environ['REMOTE_ADDR'], data)
-    requestUser = requestHost.split("-")[1]
-    hostName = requestHost + "-" + requestedApp
-
-    #controleren of applicatiecontainer al bestaat
-    if hostName in str(data):
-        return jsonify([{"already started" : requestedApp}])
-
-    # lijstje met te mounten volumes en ssh-key
-    volumeMounts = ""
-    volumeMounts += ' -v ' + externalVolume + requestUser + ':/home/' + requestUser
-    volumeMounts += ' -v ' + externalVolume + 'Public:/home/' + requestUser + '/Public '
-    volumeMounts += ' -v ' + externalVolume + requestUser + '/.ssh/id_rsa.pub:/home/' + requestUser + '/.ssh/authorized_keys:ro '
-    dockerRun = "docker run --rm -d --network " + netWork + volumeMounts
-    if requestedApp == "chrome":
-        dockerRun +=  ' --device /dev/dri --security-opt seccomp=/app/chrome.json '
-    if requestedApp == "chrome" or requestedApp == "firefox" or requestedApp == "gimp":
-        dockerRun += ' --shm-size=2g '
-    dockerCmd = str(dockerRun + ' -h ' + hostName + ' --name ' + hostName + ' -e USER=' + requestUser + " " + appImage[requestedApp])
-    os.system(dockerCmd)
-    return jsonify([{"starting" : requestedApp}])
+    @staticmethod  # docker data of running containers.
+    def _data():
+        return json.loads(subprocess.check_output('docker network inspect ' + netWork, shell=True))[0]['Containers']
     
+    def detect_host(self):  # using _data to retrieve hostname by origin IP of host
+        for i in self.data:
+            if self.data[i]['IPv4Address'].split("/")[0] == self.ip:
+                return self.data[i]['Name']
+
+    def isnew(self):  # check if container excists
+        if str(self.host + "-" + self.app) in str(self.data):
+            return False
+        else:
+            return True
+
+    def volumemounts(self): # constructing volumemounts of docker run command
+        volumes = ""
+        if self.app == "chrome":
+            volumes += '--device /dev/dri --security-opt seccomp=/app/chrome.json '
+
+        if self.app == 'firefox' or 'chrome' or 'gimp':
+            volumes += '--shm-size=2g '
+
+        volumes += '-v {0}/{1}:/home/{1} -v {0}Public:/home/{1}/Public ' \
+                   '-v {0}/{1}/.ssh/id_rsa.pub:/home/{1}/.ssh/authorized_keys:ro' \
+                   .format(externalVolume, self.user)
+        return volumes
+
+    def dockerstart(self):  # final docker run command
+        return "docker run -d --rm --name {0}-{1} --hostname {0}-{1} {2} --network {3} -e USER={4} {5}" \
+               .format(self.host, self.app, self.volumemounts, netWork, self.user, appImage[self.app])
+
+    def message(self):  # final response to POST request
+        if not self.isnew:
+            return "container already running"
+        else:
+            if not self.availableapp:
+                return "application not available"
+            else:
+                os.system(self.dockerstart)
+                return "starting " + self.app
+
+    def __init__(self, app, ip):
+        self.app = app
+        self.ip = ip
+        self.availableapp = self.app in apps
+        self.data = DockerRun._data()
+        self.host = self.detect_host()
+        self.isnew = self.isnew()
+        self.user = self.host.split("-")[1]
+        self.volumemounts = self.volumemounts()
+        self.dockerstart = self.dockerstart()
+        self.message = self.message()
+
+
+@app.route('/', methods=['POST'])
+def create_containers():
+    requestedApp = request.json.get('app')
+    originIP = request.environ['REMOTE_ADDR']
+    return jsonify([{"message" : ((DockerRun(requestedApp, originIP)).message)}])
+
 @app.errorhandler(400)
 def not_found(error):
     return make_response(jsonify({'error' : 'Not found'}), 404)
